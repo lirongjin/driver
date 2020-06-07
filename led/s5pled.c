@@ -19,7 +19,7 @@
 
 #define LED_GPIO_CON_PA		(0xe0200240)
 #define LED_GPIO_DAT_PA		(0xe0200244)
-
+ 
 #if defined(CONFIG_STATIC_MAP)
 # define rLED_GPIO_CON		(*(volatile unsigned int *)LED_GPIO_CON)
 # define rLED_GPIO_DAT		(*(volatile unsigned int *)LED_GPIO_DAT)
