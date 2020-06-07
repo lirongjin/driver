@@ -19,7 +19,7 @@
 
 #define LED_GPIO_CON_PA     (0xe0200240)
 #define LED_GPIO_DAT_PA     (0xe0200244)
-
+ 
 #if defined(CONFIG_STATIC_MAP)
 # define rLED_GPIO_CON      (*(volatile unsigned int *)LED_GPIO_CON)
 # define rLED_GPIO_DAT      (*(volatile unsigned int *)LED_GPIO_DAT)
@@ -69,7 +69,7 @@ static const struct file_operations led_chrdev = {
 
 /*
  * function: led设备文件打开函数定义。主要作用是在使用动态地址映射时进行动态地址映射操作。
- * inode: 节点指针
+ * inode: 节点指针 
  * file: 文件指针
  * ret: 成功返回0，否则返回-1。
  **/
