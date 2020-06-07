@@ -8,6 +8,7 @@
 #include <linux/io.h>
 
 
+/*配置使用静态地址映射或者是动态地址映射*/
 //#define CONFIG_STATIC_MAP
 #define CONFIG_DYNAMIC_MAP
 
@@ -20,41 +21,43 @@
 #define LED_GPIO_DAT_PA		(0xe0200244)
 
 #if defined(CONFIG_STATIC_MAP)
-#define rLED_GPIO_CON		(*(volatile unsigned int *)LED_GPIO_CON)
-#define rLED_GPIO_DAT		(*(volatile unsigned int *)LED_GPIO_DAT)
+# define rLED_GPIO_CON		(*(volatile unsigned int *)LED_GPIO_CON)
+# define rLED_GPIO_DAT		(*(volatile unsigned int *)LED_GPIO_DAT)
 #elif defined(CONFIG_DYNAMIC_MAP)
-#define rLED_GPIO_CON		(*(volatile unsigned int *)led_con)
-#define rLED_GPIO_DAT		(*(volatile unsigned int *)led_dat)
+# define rLED_GPIO_CON		(*(volatile unsigned int *)led_con)
+# define rLED_GPIO_DAT		(*(volatile unsigned int *)led_dat)
 #endif
 
+/*3个led灯在GPIO_DAT寄存器中的bit位*/
 #define LED0			3
 #define LED1			4
 #define LED2			5
 
-#define led_on(bit)			({rLED_GPIO_CON &= ~0x38; \
-							  rLED_GPIO_CON |= 0x38; \
-							  rLED_GPIO_DAT &= ~(1 << (bit)); \
+/*led打开关闭操作的宏定义和查看led状态的宏定义*/
+#define led_on(bit)			({rLED_GPIO_CON |= 1 << (bit); \
+								rLED_GPIO_DAT &= ~(1 << (bit)); \
 							})
-#define led_off(bit)		({rLED_GPIO_CON &= ~0x38; \
-							  rLED_GPIO_CON |= 0x38; \
-							  rLED_GPIO_DAT |= (1 << (bit)); \
+#define led_off(bit)		({rLED_GPIO_CON |= 1 << (bit); \
+								rLED_GPIO_DAT |= (1 << (bit)); \
 							})		
-#define led_status(bit)		({rLED_GPIO_CON &= ~0x38; \
-							  rLED_GPIO_DAT & (1 << (bit)) ? 0 : 1; \
-							})				  				  
+#define led_status(bit)		({rLED_GPIO_CON &= ~(1 << (bit)); \
+								rLED_GPIO_DAT & (1 << (bit)) ? 0 : 1; \
+							})
 
 
+/*led设备文件的打开、关闭、读和写函数的声明*/
 static int led_open(struct inode *inode, struct file *file);
 static int led_release(struct inode *inode, struct file *file);
 static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos);
 static ssize_t led_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos);
+
 #ifdef CONFIG_DYNAMIC_MAP
 static volatile unsigned int *led_con = NULL, *led_dat = NULL;
 #endif
 
 static int led_major = 0;
-static char kbuf[200] = {0};
 
+/*led文件操作结构体定义，非常关键!!!*/
 static const struct file_operations led_chrdev = {
 	.owner = THIS_MODULE,
 	.open = led_open,
@@ -64,10 +67,16 @@ static const struct file_operations led_chrdev = {
 };
 
 
-
+/*
+ * function: led设备文件打开函数定义。主要作用是在使用动态地址映射时进行动态地址映射操作。
+ * inode: 节点指针
+ * file: 文件指针
+ * ret: 成功返回0，否则返回-1。
+ **/
 static int led_open(struct inode *inode, struct file *file)
 {
 #ifdef CONFIG_DYNAMIC_MAP
+	/*申请和映射操作led的IO资源*/
 	if(!request_mem_region(LED_GPIO_CON_PA, 4, "led_con") || !request_mem_region(LED_GPIO_CON_PA, 4, "led_dat"))
 	{
 		return -EBUSY;
@@ -88,9 +97,16 @@ static int led_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/*
+ * function: led设备文件关闭函数定义。主要作用是在使用动态地址映射时进行动态地址解除映射操作。
+ * inode: 节点指针
+ * file: 文件指针
+ * ret: 成功返回0，否则返回-1。
+ **/
 static int led_release(struct inode *inode, struct file *file)
 {
 #ifdef CONFIG_DYNAMIC_MAP
+	/*解除映射和释放led的IO资源*/
 	iounmap(led_con);
 	iounmap(led_dat);
 	release_mem_region(LED_GPIO_CON_PA, 4);
@@ -100,10 +116,18 @@ static int led_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/*
+ * function: led设备文件读函数定义。可以用来获取led的当前状态
+ * file: 文件指针
+ * ubuf: 用户应用层buf地址指针
+ * count: 用户应用层buf大小
+ * ppos: 位置指针
+ * ret: 成功返回0, 否则返回-1。
+ **/
 static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
 {
 	int ret;
-	char kbuf[200] = {0};
+	char kbuf[20] = {0};
 
   
 	printk(KERN_DEBUG "led_read start\n");
@@ -113,6 +137,7 @@ static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff
 		count = sizeof(kbuf);
 	}
 	
+	/*读取led当前状态并写入kbuf中，接下来把kbuf中的内容写入到用户应用层buf中。*/
 	memset(kbuf, 0, sizeof(kbuf));
 	kbuf[0] = led_status(LED0);
 	kbuf[1] = led_status(LED1);
@@ -123,20 +148,30 @@ static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff
 	{
 		printk(KERN_ERR "led_read rest is %d\n", ret);
 
-		return count-ret;
+		return -1;
 	}
 	printk(KERN_DEBUG "led_read success copy\n");
 
-	return count;
+	return 0;
 }
 
+/*
+ * function: led设备文件写函数定义。用来控制led的亮灭。
+ * file: 文件指针
+ * ubuf: 用户应用层buf地址指针
+ * count: 用户应用层buf大小
+ * ppos: 位置指针
+ * ret: 成功返回0，否则返回-1。
+ **/
 static ssize_t led_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
 {
 	int ret;
+	char kbuf[20] = {0};
 
 
 	printk(KERN_DEBUG "led_write start\n");
 
+	/*读取用户应用层buf中的内容，根据默认的定义操作相应的led亮灭。*/
 	memset(kbuf, '\0', sizeof(kbuf));
 	if(count > sizeof(kbuf))
 	{
@@ -158,10 +193,15 @@ static ssize_t led_write(struct file *file, const char __user *ubuf, size_t coun
 	return count;
 }
 
+/*
+ * function: led驱动初始化函数，主要是注册led file_operations结构体，返回主设备号。
+ * ret: 无。
+ **/
 static int __init led_init(void)
 {
 	printk(KERN_DEBUG "led_init\n");
 	
+	/*注册led file_operations结构体，返回主设备号。*/
 	led_major = register_chrdev(0, LED_NAME, &led_chrdev);
 	if(led_major < 0)
 	{
@@ -174,6 +214,11 @@ static int __init led_init(void)
 	return 0;
 }
 
+/*
+ * function: led驱动卸载函数,用来解除注册的led字符设备文件。
+ * ret: 无。
+ * 
+ **/
 static void __exit led_exit(void)
 {
 	printk(KERN_DEBUG "led_exit\n");

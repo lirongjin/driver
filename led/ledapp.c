@@ -15,7 +15,7 @@ int fd;
 
 int main()
 {
-	size_t ret;
+// 	size_t ret;
 	char buf[100] = {0};
 	int i;
 	
