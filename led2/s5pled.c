@@ -7,6 +7,7 @@
 #include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 
 
 /*配置使用静态地址映射或者是动态地址映射*/
@@ -61,6 +62,7 @@ static volatile unsigned int *led_con = NULL, *led_dat = NULL;
 
 static dev_t led_dev = 0;
 static struct cdev *led_cdev;
+static struct class *led_class;
 
 /*led文件操作结构体定义，非常关键!!!*/
 static const struct file_operations led_fops = {
@@ -133,7 +135,6 @@ static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff
 {
     int ret;
     char kbuf[20] = {0};
-    dev_t dev = file->f_path.dentry->d_inode->i_rdev;
 
   
     printk(KERN_DEBUG "led_read start\n");
@@ -145,26 +146,9 @@ static ssize_t led_read(struct file *file, char __user *ubuf, size_t count, loff
     
     /*读取led当前状态并写入kbuf中，接下来把kbuf中的内容写入到用户应用层buf中。*/
     memset(kbuf, 0, sizeof(kbuf));
-    
-    if(MAJOR(dev) == led_dev)
-    {
-        if(MINOR(dev) == 0)
-        {
-            kbuf[0] = led_status(LED0);
-        }
-        else if(MINOR(dev) == 1)
-        {
-            kbuf[0] = led_status(LED1);
-        }
-        else if(MINOR(dev) == 2)
-        {
-            kbuf[0] = led_status(LED1);
-        }                
-        else
-        {
-            return -1;
-        }
-    }
+    kbuf[0] = led_status(LED0);
+    kbuf[1] = led_status(LED1);
+    kbuf[2] = led_status(LED2);
 
     ret = copy_to_user(ubuf, kbuf, count);
     if(ret)
@@ -190,7 +174,6 @@ static ssize_t led_write(struct file *file, const char __user *ubuf, size_t coun
 {
     int ret;
     char kbuf[20] = {0};
-    dev_t dev = file->f_path.dentry->d_inode->i_rdev;
 
 
     printk(KERN_DEBUG "led_write start\n");
@@ -210,25 +193,9 @@ static ssize_t led_write(struct file *file, const char __user *ubuf, size_t coun
     }
     printk(KERN_DEBUG "led_write success content is %s\n", kbuf);
     
-    if(MAJOR(dev) == MAJOR(led_dev))
-    {
-        if(MINOR(dev) == 0)
-        {
-            kbuf[0] ? led_on(LED0) : led_off(LED0);
-        }
-        else if(MINOR(dev) == 1)
-        {
-            kbuf[0] ? led_on(LED1) : led_off(LED1);
-        }
-        else if(MINOR(dev) == 2)
-        {
-            kbuf[0] ? led_on(LED2) : led_off(LED2);
-        }
-        else
-        {
-            return -1;
-        }
-    }
+    kbuf[0] ? led_on(LED0) : led_off(LED0);
+    kbuf[1] ? led_on(LED1) : led_off(LED1);
+    kbuf[2] ? led_on(LED2) : led_off(LED2);
 
     return count;
 }
@@ -240,14 +207,14 @@ static ssize_t led_write(struct file *file, const char __user *ubuf, size_t coun
 static int __init led_init(void)
 {
     int ret;
+    struct device *led_device;
 
     printk(KERN_DEBUG "led_init\n");
 
     ret = alloc_chrdev_region(&led_dev, LED_DEV_BASE, LED_DEV_NUM, LED_NAME);
-    if(ret)
+    if(ret < 0)
     {
         printk(KERN_ERR "alloc_chrdev_region led fail\n");
-        ret = -ENOMEM;
 
         goto err;
     }
@@ -255,7 +222,6 @@ static int __init led_init(void)
     if(!led_cdev)
     {
         printk(KERN_ERR "cdev_alloc fail\n");
-        ret = -ENOMEM;
 
         goto err_cdev_alloc;
     }
@@ -269,11 +235,33 @@ static int __init led_init(void)
         
         goto err_cdev_add;
     }
+    
+    led_class = class_create(THIS_MODULE, "led_class");
+    if(!led_class)
+    {
+        printk(KERN_ERR "class_create\n");
+        
+        ret = -ENOMEM;
+        goto err_class_create;
+    }
+    led_device = device_create(led_class, NULL, led_dev, NULL, "s5pled");
+    if(!led_device)
+    {
+        printk(KERN_ERR "device_create fail\n");
+        
+        goto err_device_create;
+    }
 
     return 0;
 
-err_cdev_add:
+err_device_create:
+    class_destroy(led_class);
+    
+err_class_create:
     cdev_del(led_cdev);
+    
+err_cdev_add:
+    kobject_put(&led_cdev->kobj);
 
 err_cdev_alloc:
     unregister_chrdev_region(led_dev, LED_DEV_NUM);
@@ -291,6 +279,8 @@ static void __exit led_exit(void)
 {
     printk(KERN_DEBUG "led_exit\n");
 
+    device_destroy(led_class, led_dev);
+    class_destroy(led_class);
     cdev_del(led_cdev);
     unregister_chrdev_region(led_dev, LED_DEV_NUM);
 }
